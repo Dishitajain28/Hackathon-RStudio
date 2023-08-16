@@ -1,0 +1,422 @@
+---
+title: "IE 6600 Sec 01 Group 10 Hackathon"
+author: "Dishita Jain"
+date: "2023-02-11"
+output: html_document
+---
+
+```{r setup, , echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r Library, echo = FALSE, include= FALSE}
+
+# Following libraries were used for this hackathon
+
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(plotly)
+library(RColorBrewer)
+library(sf)
+library(corrplot)
+library(treemapify)
+library(knitr)
+library(gridExtra)
+
+```
+
+## Problem Statement
+
+According to the U.S. Energy Information Administration, the United State’s total primary energy consumption in 2021 was approximately 16% of the total world’s primary energy consumption. Energy consumption analysis plays a critical role in understanding consumption patterns and costs. It offers various benefits to organizations, including cost savings, improved operations, and better decision-making. Energy consumption analysis helps organizations identify areas where they can reduce energy usage, leading to lower energy bills and cost savings. It can also reveal inefficiencies in operations and processes, allowing organizations to improve their overall efficiency. By understanding energy consumption patterns, organizations can make informed decisions about energy-related investments, such as adopting new technologies, leading to increased competitiveness. In conclusion, energy consumption analysis is valuable for organizations looking to improve their operations, reduce costs, and contribute to a more sustainable future. 
+
+In this report, Boston’s Monthly Utility Dataset has been used which provides energy consumption data by different energy types from 1969 to 2023. But due to data inconsistencies, this report focuses on data from 2011 to 2022. The three sections our analysis is divided into are - 1) Identifying trends and spikes in consumption, 2) Cost analysis for better utilization and allocation of resources, 3) External or internal factors influencing the unit price for each energy type over the years. These will give us more insights into different aspects such as the trends and spikes in consumption of different energy types, price analysis, areas consuming the highest amount of energy, consumption by seasons/quarters, and more.   
+
+
+```{r DataCleaning, echo = FALSE, warning= FALSE, message=FALSE}
+
+# Reading csv dataset into a dataframe
+
+df <- read.csv('boston_utility.csv')
+
+# Converting dates from character to date format 
+
+df$InvoiceDate <- as.Date(df$InvoiceDate, "%d-%m-%Y")
+df$ToDate <- as.Date(df$ToDate, "%d-%m-%Y")
+
+# Checking if InvoiceDate falls after ToDate
+df <- df[df$InvoiceDate >= df$ToDate, ]
+
+# Converting UomName into uniform measurements for each energy type
+for (i in 1:nrow(df)) {
+  
+  # 1 MMBTU = 293.07107 kWh
+  if (df$EnergyTypeName[i] == "Electric" & df$UomName[i] == "MMBTU") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 0.003412, 2); 
+    df$UomName[i] = "kWh"
+  } 
+  
+  # kW = kWh 
+  else if (df$EnergyTypeName[i] == "Electric" & df$UomName[i] == "kW") {
+    df$UomName[i] <- "kWh"
+  } 
+  
+  # themr = 29.3001 kwh
+  else if (df$EnergyTypeName[i] == "Electric" & df$UomName[i] == "Therms") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 29.3001, 2);
+    df$UomName[i] <- "kWh"
+  }
+  
+  # 1 CCF = 1.037 therms
+  else if (df$EnergyTypeName[i] == "Natural Gas" & df$UomName[i] == "CCF") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 1.037, 2); 
+    df$UomName[i] = "therms"
+  }
+  
+  # 1 Mlbs = 10.55 therms
+  else if (df$EnergyTypeName[i] == "Natural Gas" & df$UomName[i] == "Mlbs") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 10.55, 2);
+    df$UomName[i] = "therms"
+  }
+  
+ # 1 MMBTU = 10.55 therms
+  else if (df$EnergyTypeName[i] == "Natural Gas" & df$UomName[i] == "MMBTU") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 10.55, 2);
+    df$UomName[i] = "therms"
+  }
+  
+  # Therms = therms
+  else if (df$EnergyTypeName[i] == "Natural Gas" & df$UomName[i] == "Therms") {
+    df$UomName[i] = "therms"
+  }
+  
+  # Mlbs * 1000 = KLbs
+   else if (df$EnergyTypeName[i] == "Steam" & df$UomName[i] == "Mlbs") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] * 1000, 2);
+    df$UomName[i] = "KLbs. (thousand pounds)"
+   }
+  
+  # CF = 100 CCF
+   else if (df$EnergyTypeName[i] == "Water" & df$UomName[i] == "CCF") {
+    df$TotalConsumption[i] <- round(df$TotalConsumption[i] / 1000, 2);
+    df$UomName[i] = "CF"
+   }
+}
+
+# Selecting subset of data from 2011 to 2022
+df <- df %>% 
+  mutate('Year' = year(InvoiceDate)) %>% 
+  subset(Year %in% 2011:2022) %>% 
+  drop_na()
+
+```
+
+## Data 
+
+``` {r corplot, fig.width = 10, fig.height = 10, fig.align = 'center', echo = FALSE, warning= FALSE, message=FALSE}
+
+# Finding the correlation matrix between 
+cor_plot <- cor(df[, sapply(df, is.numeric)], use = "complete.obs")
+
+# Plotting correlation matrix to a plot 
+corrplot(cor_plot, method = 'pie', col = colorRampPalette(c("coral", "darkblue"))(100), tl.col = "black", order = "AOE")
+
+```
+
+
+## Section 1 - Identifying trends and spikes in data 
+
+Question 1: What is the pattern in the overall use of different energy sources?
+
+``` {r Question1, fig.width = 8, fig.height = 5, fig.align = 'center', echo = FALSE, warning= FALSE}
+
+# Grouping by year and type of energy to get the sum of consumption 
+con_df <- as.data.frame(df %>%
+                          select(Year, EnergyTypeName, TotalConsumption) %>%
+                          group_by(Year, EnergyTypeName) %>%
+                          summarise(Consumption = sum(TotalConsumption, na.rm = TRUE)))
+
+# Plotting the data grouped previously 
+p2 <- plot_ly(x = as.factor(con_df$Year), 
+              y = con_df$EnergyTypeName, 
+              z = con_df$Consumption, 
+              type = 'heatmap',
+              colorscale = 'YlGnBu', 
+              colorbar = list(title = 'Electricity Consumed')) %>%
+  layout(title = 'Total Energy Consumption in Boston from 2011 to 2022',
+         xaxis = list(title = 'Year'),
+         yaxis = list(title = 'Energy Type'))
+p2
+
+# For ignoring the R console message from being printed in the HTML file
+sink(file = NULL)
+```
+
+Insight 1: 
+
+The graph presents a comprehensive analysis of the use of different energy sources from 2011-2022. It showcases the fluctuations and trends in the usage of water, steam, natural gas, #2 oil, and electricity. It can be inferred that the utilization of these energy sources is subject to change, with no discernible pattern emerging from the data. However, one clear observation that can be made is the consistent high consumption of electricity. Despite the fluctuations in the usage of other energy sources, the consumption of electricity always remains at a significantly higher level (in millions). This highlights the growing dependence on electricity as a primary energy source, as compared to the other options.
+
+
+Question 2: How does the utilization of electricity vary in various regions of Boston during the year 2022? Which area consumed the highest amount of energy?
+
+``` {r Question2, fig.width = 20, fig.height = 15, fig.align = 'center', echo = FALSE, warning= FALSE, message = FALSE}
+
+# Filtering to get records for 2022 of the energy type electricity
+zip_df <- as.data.frame(df %>% 
+                          select(Year, StreetAddress, City, Abbreviation, Zip, EnergyTypeName, TotalConsumption) %>%
+                          filter(Year == 2022, EnergyTypeName == 'Electric')) %>%
+                        drop_na()
+
+# Getting the total consumption in 2022 by zip codes in boston
+con_by_zip <- zip_df %>% 
+  group_by(Zip) %>% 
+  summarise('ElectricityConsumed' = sum(TotalConsumption, na.rm = TRUE), .groups = 'drop')
+
+# Cleaning zipcodes to convert them into a 5-digit format
+con_by_zip <- con_by_zip[-1, ]
+con_by_zip$Zip <- paste0('0',con_by_zip$Zip)
+
+# Reading the shape file for getting geographical details of the zip codes across US
+zip_codes <- st_read("tl_2019_us_zcta510/tl_2019_us_zcta510.shp")
+
+# Fetching only records from shapefile where the zip codes match with zip codes in our data   
+zip_with_count <- zip_codes %>%
+  right_join(con_by_zip, by = c('ZCTA5CE10' = 'Zip'))
+  
+# Plotting map with the data 
+ggplot(data = zip_with_count, aes(fill = ElectricityConsumed, label = ZCTA5CE10)) +
+  geom_sf() +
+  geom_sf_label(fill = "white",  
+                fun.geometry = sf::st_centroid) +
+  scale_fill_distiller(palette = 'Spectral', direction = -1, label = comma, name = 'Electricity Consumed') +
+  theme(axis.title = element_blank(), 
+        axis.text = element_blank(), 
+        axis.ticks = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        plot.title = element_text(hjust = 0.5, size = 20)) + 
+  ggtitle('Electricity Consumption by Areas in Boston in 2022')
+
+```
+
+Insight 2: 
+
+The above map provides a visual representation of the electricity consumption across various zip codes in Boston during the year 2022. The map highlights the differences in energy consumption in different regions of the city. Based on the data presented, it can be concluded that zip code 02119 had the highest level of electricity consumption among all the zip codes in Boston. This suggests that the area has a higher demand for energy and could potentially be a densely populated region or have a large number of commercial and industrial establishments. On the other hand, the zip codes located in the suburbs of Boston had comparatively lower levels of electricity consumption. This could indicate that these areas are less densely populated and have fewer commercial or industrial establishments, leading to lower energy consumption. The map provides valuable insight into the energy consumption patterns in different regions of Boston and can be useful in planning and managing energy resources in the city.
+
+
+Question 3: How energy usage has changed in each quarter with differnt energy type?
+
+``` {r Insight 3, echo = FALSE, fig.width = 10, fig.height = 10, fig.align = 'center', warning= FALSE, message=FALSE} 
+
+# Adding variable into the data set. 
+df$quarter <- ceiling(as.numeric(format(as.Date(df$InvoiceDate), "%m")) / 3)
+
+# total_usage_agg
+usage_agg_data_t <- df %>%
+  group_by(EnergyTypeName) %>%
+  summarize(total_usage = sum(TotalConsumption))
+  
+# Get the total usage by quarter
+usage_agg_data <- df %>%
+  group_by(quarter, UomName, EnergyTypeName) %>%
+  summarize(quarter_Consumption = sum(TotalConsumption))%>% left_join(usage_agg_data_t, by = c("EnergyTypeName"))
+
+# Calculate the percentage
+usage_agg_data$percent_usage <- round((usage_agg_data$quarter_Consumption/usage_agg_data$total_usage)*100,2)
+
+# Plotting aggregated data   
+ggplot(usage_agg_data, aes(x = quarter, y = percent_usage, fill = EnergyTypeName)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Energy Usage by Quarter and Energy Type",
+       x = "Quarter", y = "Total Consumption") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_classic() +
+  geom_text(aes(label=percent_usage),vjust=1,size=3,color="black") +
+  facet_wrap(~EnergyTypeName, ncol = 2)
+
+```
+
+Insight 3: 
+
+According to the dataset, we have five types of energy resources. From 2011 to 2022, the total usage has significant variance in #2oil, Natural Gas, Steam, and water; the electric usage is separated even in this plot. For the #2oil, we have huge use age in Q1 and Q4, which almost contain more than 80% of the usage of the total year. Natural Gas has more than 60% usage in Q1 and Q4, which is cold in Boston, and there huge gap in Q3. Therefore, we suspect that the #2oil and natural gas are temperature-sensitive energy, the usage would be significant when it is cold, and less demanded as the weather is warm. Both steam and water have the highest demand in Q3, but the demand is decreasing sharply in Q4. We can only suggest that we need to allocate more of these two energy in Q3. 
+
+
+## Section 2 - Cost analysis for better utilization and allocation of resources 
+
+Question 4: How energy cost has changed in each quarter with different energy type?
+
+``` {r Insight 4, echo = FALSE, fig.width = 10, fig.height = 5, fig.align = 'center', warning= FALSE, message=FALSE}
+
+#total_cost_agg
+cost_agg_data_t <- df %>%
+  group_by(quarter) %>%
+  summarize(total_usage = sum(TotalCost))
+  
+# create the percentage of the cost by quarter
+cost_agg_data <-df %>%
+  group_by(EnergyTypeName, quarter) %>%
+  summarize(quarter_usage = sum(TotalCost))%>% left_join(cost_agg_data_t, by = c("quarter"))
+cost_agg_data$percent_usage <- round((cost_agg_data$quarter_usage/cost_agg_data$total_usage)*100,2)
+
+# The total cost distribution by quarter
+ggplot(cost_agg_data, aes(x=factor(quarter), y=percent_usage, fill=EnergyTypeName)) + 
+  geom_bar(stat="identity") + 
+  xlab("Quarter") + 
+  ylab("Total Energy Cost Percentage") + 
+  ggtitle("Total Energy cost by Energy Type and Quarter") + 
+  scale_x_discrete(limits=c(1, 2, 3, 4), labels=c("Q1", "Q2", "Q3", "Q4")) + 
+  scale_fill_discrete(name="Energy Type") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 1))+
+  #geom_text(aes(label = percent_usage), vjust = 3, size = 6, color = "black")+
+  theme(plot.title = element_text(hjust = 0.3))
+
+```
+
+Insight 4: 
+
+Above all, we can see that electric energy cost people the most every season, especially in Q3, which takes more than 60% of the total energy spent. Combine with the result in task three, the consumption of electric energy does not change significant with in quarters, and Q3 also with highest the usage of energy. Therefore, we suspect the price per unit of electricity may be changed during the season, and the significant usage of Natural gas in Q1 and Q2 also impacts the cost structure. In this case, we suggest people pay more attention to the price of electric energy and natural gas.
+
+
+Question 5: 
+
+Cost Analysis by department : Plotting the top 5 departments with the highest Energy Cost and representing it using a bar graph
+Here we would like to understand which departments have the highest energy costs and we would like to analyze by plotting the bar graph to get the top 5 departments with the most total costs and how much energy costs differ among them and others 
+
+``` {r Insight 5, echo = FALSE, fig.width = 20, fig.height = 15, fig.align = 'center', warning= FALSE, message=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(plotly)
+
+# Group the data by department and calculate the total cost
+data_grouped <- df %>% 
+  group_by(DepartmentName) %>% 
+  summarize(total_cost = sum(TotalCost))
+
+# Sort the data in descending order and select the top 5 departments
+data_top_5 <- data_grouped %>% 
+  arrange(desc(total_cost)) %>% 
+  head(5)
+
+# Specify the colors for each bar
+colors <- c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd")
+
+# Plot the bar graph using Plotly
+plot_ly(data_top_5, x = ~DepartmentName, y = ~total_cost/1000000, type = "bar", color = colors,
+        name = ~DepartmentName ) %>% 
+  layout(yaxis = list(title = "Total Cost (in Millions)"))
+
+```
+
+Insight 5: 
+
+The conclusion we can draw from the bar plot is that BPS has the highest Energy cost , as the bar plot showed us the top 5 departments having the highest Energy costs among all departments BPS having a little over 200M, followed by PWD having around 100M and then the other 3 (BPD,BPL & PMD) having around 30M. The BPS department's total cost far exceeds the others combined together which is something very interesting to gather from this data.
+
+
+Question 6: 
+
+Total Energy Consumption for BPS department for each year and representing it using a line graph
+Here we would like to understand how the Total energy consumption is over the years for BPS department and where can we see sudden rises and falls in the data given that there would be quite change in the consumption over the years 
+
+``` {r Insight 6, echo = FALSE, fig.width = 20, fig.height = 15, fig.align = 'center', warning= FALSE, message=FALSE}
+
+# Grouping the data by year and calculating the total consumption
+grouped_data <- df %>%
+  filter(DepartmentName == "BPS") %>%
+  group_by(Year) %>%
+  summarise(total_consumption = sum(TotalConsumption))
+
+# Plotting the line graph
+plot_ly(grouped_data, x = ~as.factor(Year), y = ~total_consumption, type = "scatter", mode = "lines") %>%
+  layout(title = "Total Consumption Trend for BPS Department by Year",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Total Consumption"))
+
+```
+
+Insight 6: 
+
+The conclusion we can draw from the line graph is that the Total consumption for BPS department is the highest in 2019 which is a little below 200M . There is a slight increase in total consumption from 2011 to 2018 and then a sudden uprise from 2018 to 2019 . However what's even more interesting to see here is sudden drop from 2019 to 202 in the total consumption from 117M to straight 68M and then again an increase.
+
+
+## Section 3 - External or internal factors influencing the unit price for each energy type over the years
+
+Question 7: 
+
+Cost Analysis by energy type : Plotting the Total cost of each energy type and representing it using a pie chart 
+Here we would like to understand which energy type has the highest total cost among the 5 and occupies what percent of the total cost of energy  
+
+``` {r Insight 7, echo = FALSE, fig.width = 20, fig.height = 15, fig.align = 'center', warning= FALSE, message=FALSE}
+
+#grouping by energy type and counting total cost 
+df_grouped <- df %>%
+  group_by(EnergyTypeName) %>%
+  summarize(Total_Cost = sum(TotalCost))
+df_grouped
+
+# Plot the total cost by energy type
+plot_ly(df_grouped, x = df_grouped$EnergyTypeName, y = df_grouped$Total_Cost, type = "scatter", mode = "lines+markers")
+
+#plotting the piechart 
+plot_ly(
+  labels = df_grouped$EnergyTypeName,
+  values = df_grouped$Total_Cost,
+  type = "pie",
+  textinfo = "label+value+percent",
+  hoverinfo = "text"
+)
+
+```
+
+Insight 7: 
+
+From the pie chart above as expected the total cost is highest for electric energy which is consumed in an excess amount everywhere having 55.9% of the total which is more than half among all energy types combined, followed by natural gas and then water . Oil is the lowest among the 5 when it comes to total cost having around just 1 %.
+
+
+Question 8:
+
+Change in total cost over years and how that was influenced by external factors 
+Here we would like to understand if there are any external factors that would influence the energy cost for the different energy types over time calculating the change in cost each year and thn noticing why there was a sudden downfall or uprise in the data and figure out the reasons for the same. 
+``` {r Insight 8, echo = FALSE, fig.width = 20, fig.height = 15, fig.align = 'center', warning= FALSE, message=FALSE}
+
+# Group the data by energy type and year, and calculate the sum of total cost for each group
+df_grouped <- df %>%
+  group_by(EnergyTypeName, Year) %>%
+  summarize(Total_Cost = sum(TotalCost) ,.groups = 'drop')
+
+# Create a function to calculate the difference in Total cost between consecutive years for each energy type
+calculate_difference <- function(x) {
+  return(c(0, diff(x)))
+}
+
+# Apply the difference calculation function to each energy type
+df_difference <- df_grouped %>%
+  group_by(EnergyTypeName) %>%
+  mutate(Difference = calculate_difference(Total_Cost))
+
+# Plot the line graph
+plot_ly(df_difference, x = ~as.factor(Year), y = ~Difference, color = ~EnergyTypeName, type = "scatter", mode = "lines") %>%
+  layout(title = "Change in Total Cost for Each Energy Type",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Difference in Total Cost"))
+
+```
+
+Insight 8:
+
+The COVID-19 pandemic, which began to impact the United States in early 2020, likely played a role. As people began to work from home and businesses temporarily closed, there was a decrease in electricity costs for commercial and industrial purposes.
+
+## Conclusion 
+
+The Analysis of the Boston Monthly Utility data provides valuable insights into the trends and patterns of US Energy Consumption over the decade. The data highlights the dominant energy sources used in the city, and how they have changed over time. Through analyzing this survey, we were able to get insight into how Total Energy consumption has changed during this time and how it varies by location and seasons. Furthermore, the data reveals the significant increase in energy consumption, particularly in recent years. We have also gathered insights on which departments in Boston utilize the most energy and how that trend changes over years. Geographically, we are able to see how some parts of Boston consume a lot of energy compared to others and how some departments have exceedingly high energy costs. We can also observe how extraneous factors have influenced the variation in overall cost over the past ten years and are the cause of the jarring increases and decreases.
+
+## References
+
+[1] Dataset Link - https://data.boston.gov/dataset/city-of-boston-utility-data/resource/35fad26c-1400-46b0-846c-3bb6ca8f74d0
+[2] Reference for Insight 7 - https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/statewide/time-series/19/tavg/1/1/2010-2023?base_prd=true&begbaseyear=2011&endbaseyear=2023
+
+

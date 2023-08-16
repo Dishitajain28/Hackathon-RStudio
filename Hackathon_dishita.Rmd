@@ -1,0 +1,142 @@
+---
+title: "Hackathon_Dishita"
+output: html_document
+date: "2023-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+Task 5
+Cost Analysis by department : Plotting the top 5 departments with the highest Energy Cost and representing it using a bar graph
+Here we would like to understand which departments have the highest energy costs and we would like to analyze by plotting the bar graph to get the top 5 departments with the most total costs and how much energy costs differ among them and others 
+```{r }
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(plotly)
+
+
+df <- read.csv('Boston_monthly_ulility.csv')
+
+# Group the data by department and calculate the total cost
+data_grouped <- df %>% 
+  group_by(DepartmentName) %>% 
+  summarize(total_cost = sum(TotalCost))
+
+# Sort the data in descending order and select the top 5 departments
+data_top_5 <- data_grouped %>% 
+  arrange(desc(total_cost)) %>% 
+  head(5)
+
+# Specify the colors for each bar
+colors <- c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd")
+
+# Plot the bar graph using Plotly
+plot_ly(data_top_5, x = ~DepartmentName, y = ~total_cost/1000000, type = "bar", color = colors,
+        name = ~DepartmentName ) %>% 
+  layout(yaxis = list(title = "Total Cost (in Millions)"))
+```
+Conclusion:
+The conclusion we can draw from the bar plot is that BPS has the highest Energy cost , as the bar plot showed us the top 5 departments having the highest Energy costs among all departments BPS having a little over 200M, followed by PWD having around 100M and then the other 3 (BPD,BPL & PMD) having around 30M . The BPS department's total cost far exceeds the others combined together which is something very interesting to gather from this data . 
+
+
+
+Task 6 
+Total Energy Consumption for BPS department for each year and representing it using a line graph
+Here we would like to understand how the Total energy consumption is over the years for BPS department and where can we see sudden rises and falls in the data given that there would be quite change in the consumption over the years 
+```{r pressure, echo=FALSE}
+# using date format to get year from invoice date
+df$InvoiceDate <- as.Date(df$InvoiceDate, format = "%Y-%m-%d")
+df$year <- year(df$InvoiceDate)
+
+# Grouping the data by year and calculating the total consumption
+grouped_data <- df %>%
+  filter(DepartmentName == "BPS") %>%
+  group_by(year) %>%
+  summarise(total_consumption = sum(TotalConsumption))
+
+# Plotting the line graph
+plot_ly(grouped_data, x = ~year, y = ~total_consumption, type = "scatter", mode = "lines") %>%
+  layout(title = "Total Consumption Trend for BPS Department by Year",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Total Consumption"))
+```
+Conclusion:
+The conclusion we can draw from the line graph is that the Total consumption for BPS department is the highest in 2019 which is a little below 200M . There is a slight increase in total consumption from 2011 to 2018 and then a sudden uprise from 2018 to 2019 . However what's even more interesting to see here is sudden drop from 2019 to 202 in the total consumption from 117M to straight 68M and then again an increase . 
+
+
+
+Task 9
+Cost Analysis by energy type : Plotting the Total cost of each energy type and representing it using a pie chart 
+Here we would like to understand which energy type has the highest total cost among the 5 and occupies what percent of the total cost of energy  
+```{r}
+#grouping by energy type and counting total cost 
+df_grouped <- df %>%
+  group_by(EnergyTypeName) %>%
+  summarize(Total_Cost = sum(TotalCost))
+df_grouped
+
+# Plot the total cost by energy type
+plot_ly(df_grouped, x = df_grouped$EnergyTypeName, y = df_grouped$Total_Cost, type = "scatter", mode = "lines+markers")
+
+#plotting the piechart 
+plot_ly(
+  labels = df_grouped$EnergyTypeName,
+  values = df_grouped$Total_Cost,
+  type = "pie",
+  textinfo = "label+value+percent",
+  hoverinfo = "text"
+  
+)
+```
+Conclusion:
+From the pie chart above as expected the total cost is highest for electric energy which is consumed in an excess amount everywhere having 55.9% of the total which is more than half among all energy types combined, followed by natural gas and then water . Oil is the lowest among the 5 when it comes to total cost having around just 1 % 
+
+
+
+Task 7 
+Change in total cost over years and how that was influenced by external factors 
+Here we would like to understand if there are any external factors that would influence the energy cost for the different energy types over time calculating the change in cost each year and thn noticing why there was a sudden downfall or uprise in the data and figure out the reasons for the same . 
+```{r}
+
+#extracting year from invoice date 
+df$Year <- as.integer(substr(df$InvoiceDate, 1, 4))
+
+# Group the data by energy type and year, and calculate the sum of total cost for each group
+df_grouped <- df %>%
+  group_by(EnergyTypeName, Year) %>%
+  summarize(Total_Cost = sum(TotalCost) ,.groups = 'drop')
+
+# Create a function to calculate the difference in Total cost between consecutive years for each energy type
+calculate_difference <- function(x) {
+  return(c(0, diff(x)))
+}
+
+# Apply the difference calculation function to each energy type
+df_difference <- df_grouped %>%
+  group_by(EnergyTypeName) %>%
+  mutate(Difference = calculate_difference(Total_Cost))
+
+# Plot the line graph
+plot_ly(df_difference, x = ~Year, y = ~Difference, color = ~EnergyTypeName, type = "scatter", mode = "lines") %>%
+  layout(title = "Change in Total Cost for Each Energy Type",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Difference in Total Cost"))
+```
+Conclusion:
+From this line plot we have learned that the water is quite stable across the years however there are very distinct spikes (ups and downs) in electric energy type and natural gas . 
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
